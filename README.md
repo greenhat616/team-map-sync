@@ -83,4 +83,6 @@ The CPU saving of either would land on a worker thread (full regions are only en
 ./gradlew buildModJar
 ```
 
-Output: `build/jar/TeamMapSync-1.3.3-1.0.jar`.
+Output: `build/jar/TeamMapSync-1.3.3-1.0.jar`. Gradle 9 needs JDK 17 or newer (`JAVA_HOME`).
+
+Run in dev mode with `./gradlew runClient` (`-dev -mod build/jar/`); a plain Steam launch does not pass `-mod`, so the dev mod is not listed. The Workshop upload button only appears when the jar contains `resources/preview.png`; regenerate it with `python tools/make_workshop_images.py .` (needs Pillow and Windows fonts).
