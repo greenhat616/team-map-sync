@@ -1,0 +1,57 @@
+[h1]Team Map Sync[/h1]
+[b]Players on the same team share one map: what anyone explores shows up for everyone, plus shared map markers.[/b]
+Works with Host World and dedicated servers. No other mods required.
+
+[h2]Features[/h2]
+[list]
+[*][b]Live shared exploration[/b]: what a teammate uncovers appears on your map within a few seconds, wherever you are. Terrain changes they see (mined walls, new buildings) are synced too.
+[*][b]Catch up after being away[/b]: the server keeps one merged map per team. When you join, it fills in everything your team explored while you were offline.
+[*][b]Your earlier exploration counts[/b]: when you join a team (or install the mod into an existing world), the map you had already explored is shared with the team.
+[*][b]Team markers[/b]: tick [i]Share with team[/i] when editing a map marker. Teammates see it within seconds, and edits and deletions sync. Unticked markers stay personal.
+[*][b]Built to stay out of the way[/b]: the server only relays already-compressed data; decompression, merging and saving run on background threads, and transfers are bandwidth-capped.
+[/list]
+
+[h2]How to use[/h2]
+[list]
+[*]Everyone (server and every player) installs the mod.
+[*]Create or join a team in game. Sharing is per team; players without a team are not affected.
+[*]Explore. To share a marker, open the marker editor on the map and tick [i]Share with team[/i]. New markers remember your last choice.
+[/list]
+
+[h2]Notes[/h2]
+[list]
+[*]Leaving or switching teams keeps the map you already have; the old team's shared markers are removed and the new team's map is sent to you.
+[*]A team can have up to 500 shared markers.
+[*]The team map is stored by the server in its data folder ([i]teammapsync/<world ID>[/i]); your personal map files only receive the shared tiles.
+[*]Pure black map tiles count as unexplored, the same as in the base game's own map files.
+[/list]
+
+[hr][/hr]
+
+[h1]Team Map Sync 队伍地图同步[/h1]
+[b]同一队伍的玩家共用一张地图：任何人探索过的区域，所有人都能看到；还能共享地图标记。[/b]
+支持「主持世界」和独立服务器，不需要任何前置 Mod。
+
+[h2]功能[/h2]
+[list]
+[*][b]实时共享探索[/b]：队友探索到的区域几秒内就会出现在你的地图上，不管你在哪里。队友看到的地形变化（挖掉的墙、新盖的房子）也会同步。
+[*][b]离线回来，地图补齐[/b]：服务端为每个队伍保存一张合并后的地图。你上线时，会自动补上你离线期间队伍新探索的区域。
+[*][b]以前的探索也算数[/b]：加入队伍（或在已有存档中安装本 Mod）时，你之前探索过的地图也会共享给队伍。
+[*][b]队伍共享标记[/b]：编辑地图标记时勾选「共享给队伍」，队友几秒内就能看到，修改和删除也会同步。不勾选的标记仍是你的个人标记。
+[*][b]尽量不打扰游戏[/b]：服务端只转发已经压缩好的数据；解压、合并、存盘都在后台线程完成，传输带宽也有上限。
+[/list]
+
+[h2]使用方法[/h2]
+[list]
+[*]服务端和所有玩家都需要安装本 Mod。
+[*]在游戏中创建或加入队伍。按队伍共享，没有队伍的玩家不受影响。
+[*]正常探索即可。共享标记：在地图上打开标记编辑框，勾选「共享给队伍」。新建标记会记住你上一次的选择。
+[/list]
+
+[h2]说明[/h2]
+[list]
+[*]退出或更换队伍时，已有的地图会保留；原队伍的共享标记会被移除，新队伍的地图会发给你。
+[*]每个队伍最多 500 个共享标记。
+[*]队伍地图由服务端保存在其数据目录中（[i]teammapsync/<世界 ID>[/i]）；你的个人地图文件只会写入共享来的区域。
+[*]纯黑色的地图格子会被视为未探索，这和原版地图文件的规则一致。
+[/list]
