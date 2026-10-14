@@ -7,7 +7,7 @@ plugins {
 
 project.ext.modID = "a632079.teammapsync" // The unique id of your mod. Must be all lowercase and cannot use special characters.
 project.ext.modName = "Team Map Sync" // The display name of your mod.
-project.ext.modVersion = "1.0" // Your current builds version. Must follow the xx.xx... format.
+project.ext.modVersion = "1.1" // Your current builds version. Must follow the xx.xx... format.
 project.ext.gameVersion = "1.3.3" // The target game version.
 project.ext.modDescription = "Shares map exploration and team map markers between players on the same team"
 project.ext.author = "a632079" // Your name

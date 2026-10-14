@@ -16,19 +16,32 @@ Every player must have the mod (it registers packets, so it is not `clientside`)
 | Part | Mechanism |
 |---|---|
 | Recording | Patch on `ClientDiscoveredMapRegion.setRGBA`, active only while the real map runs `tickDiscovery` / `tickUpdate`. Each changed tile is one append to a primitive buffer. Flushed every 2 s. |
-| Live relay | Client encodes changed tiles per map region and sends them; server forwards the compressed bytes untouched to online teammates. Live data **overwrites** (it is the newest observation, so terrain changes propagate). |
-| Offline teammates | Server merges everything into a per-team store (`<datadir>/teammapsync/<worldID>/team<N>/`). On join it streams the team map as **fill** data (only fills undiscovered tiles). |
-| Backlog | On join (or team change) a client uploads local map files changed since its last upload for that team, so exploration from before installing the mod or joining the team is shared too. |
-| Markers | The edit form gets a "Share with team" checkbox. Shared markers live in the vanilla list (drawn and edited normally) but are owned by the server, kept out of `icons.mapdata`, and identified by UUID. Edits are picked up by polling with a short debounce. |
-| Team changes | Server checks each player's team once a second; a change resets the session (old team markers removed, new team map streamed). |
+| Live relay | Client encodes changed tiles per map region band (16 rows) and sends them; server forwards the compressed bytes untouched to online teammates. Live data **overwrites** (it is the newest observation, so terrain changes propagate); live data travels in an ordered stream, so a late or resent update never undoes a newer one. |
+| Offline teammates | Server merges everything into a per-team store (`<datadir>/teammapsync/<worldID>/v2/<teamKey>/`). On join it streams the team map as **fill** data (only fills undiscovered tiles), a few regions at a time. |
+| Backlog | On join (or team change) a client uploads every local map file the server has not acknowledged for that team (tracked per file by modification time and size), so exploration from before installing the mod or joining the team is shared too. |
+| Other levels | Tiles for a level the player is not on go to a client-side inbox (`teammapsync/client/<worldID>/inbox/`), never into vanilla's map files, which vanilla may load or save at any moment. The inbox is replayed into the open map when the player enters the level, without overwriting tiles that live data or the player changed since; an entry is removed only once fully applied, and tiles not yet applied when the game closes are saved to it. |
+| Markers | The edit form gets a "Share with team" checkbox. Shared markers live in the vanilla list (drawn and edited normally) but are owned by the server, kept out of `icons.mapdata`, and identified by UUID. Changes are sent when the edit form closes (a cancelled new marker never reaches the team), one request in flight per marker; the server sends the result to every teammate in order. A result for a marker being edited is held back until the edit is over, then applied unless the player changed the marker. |
+| Team identity | Vanilla renumbers teams on every load (the saved `teamID` is ignored), so the mod stores a UUID in each team's save record (`teamMapSyncID`) and keys all team data by it. |
+| Team changes | Server checks each player's team every half second and on every received packet; a change starts a new session (old team markers removed, new team map streamed). |
+
+## Network reliability
+
+Vanilla's transport is unreliable (Steam "unreliable" messages or plain UDP). Packets are cut into 1 KB fragments, a packet missing one fragment is dropped, and nothing is resent; vanilla features recover by themselves (region requests are repeated after 2 s). This mod therefore runs its own delivery on top:
+
+- **Handshake**: the client sends a heartbeat every second; the server starts a session on the first one and repeats the session announcement until a heartbeat names it. Every session has a new **epoch**, carried by every packet, so data from an earlier team or connection is dropped.
+- **Acknowledged delivery** (`ReliableChannel`): tiles and markers carry a sequence number, are acknowledged in batches and resent with backoff (2 s, up to 16 s) until acknowledged. Receivers drop repeats (`SeqWindow`). Live tiles and markers also carry a gapless ordinal and are applied in sending order (`OrderedBuffer`); stored and backlog data only fills undiscovered tiles, so its order does not matter.
+- **Small packets**: tiles travel in 16-row bands, about one fragment each, so a lost fragment costs one band, not a whole region.
+- **Congestion**: bytes in flight are capped, so a slow or lossy link slows this traffic through late acknowledgements. Bulk data backs off further while the client's vanilla region loading has requests outstanding, leaving room for terrain.
+- A local map file only counts as uploaded once every packet of it was acknowledged; the server stops acknowledging when a player exceeds its receive allowance, so excess uploads are delayed, not lost.
 
 ## Performance design
 
 The guiding constraint is no effect on server TPS.
 
 - **Server thread** only forwards already-compressed bytes, updates counters and drains send queues. Decoding, merging, encoding and all file IO run on one low-priority worker thread.
-- **Bandwidth caps**: per player upload 96 KB/s (burst 384 KB), backlog send 6 KB/tick per player and 48 KB/tick per server.
-- **Client game thread** writes received tiles into the open map at most 4096 tiles per tick; compression and file merges run on a worker thread.
+- **Bandwidth caps**: client upload about 40 KB/s; server send about 50 KB/s per player and 320 KB/s for the whole server, players served round robin; server accepts at most 96 KB/s per player (burst 192 KB). Overdrafts carry over to later ticks, so large packets cannot exceed the average.
+- **Client game thread** writes received tiles into the open map at most 4096 tiles per tick; compression and file access run on a worker thread.
+- **Memory**: stored maps are streamed to joining players and replayed from the inbox a few regions at a time, never loaded as a whole.
 
 ### Data format
 
@@ -71,10 +84,13 @@ The CPU saving of either would land on a worker thread (full regions are only en
 ## Known limits
 
 - Players without a team (team ID -1) do not share anything.
-- Tiles for a level the player has never visited this session wait in memory (up to about 1M tiles) until the level size is known; beyond that they are dropped and resent on the next join.
+- Team data accepted by the server is written to disk within 30 s (markers within 5 s); a server crash in that window loses it from the store, although clients may already count it as uploaded.
+- Local map regions that received teammates' tiles are saved by vanilla with a new timestamp and uploaded again (as fill data) on the next join.
+- Ticking or unticking "Share with team" applies when the edit form closes, also when the form is cancelled.
 - Pure black map tiles are treated as undiscovered, as in vanilla's own files.
 - A team is capped at 500 shared markers.
-- The `deletemapdata` client command wipes shared markers locally only; they return on the next join.
+- The `deletemapdata` client command wipes shared markers locally only (the mod detects the command); they return on the next join.
+- Version 1.1 changed the protocol and the server store layout (`v2/`, keyed by team UUID): all players must update, and team maps are rebuilt from the players' uploads once.
 - Patches bind to exact method signatures of 1.3.3; re-check after game updates.
 
 ## Build
@@ -83,6 +99,6 @@ The CPU saving of either would land on a worker thread (full regions are only en
 ./gradlew buildModJar
 ```
 
-Output: `build/jar/TeamMapSync-1.3.3-1.0.jar`. Gradle 9 needs JDK 17 or newer (`JAVA_HOME`).
+Output: `build/jar/TeamMapSync-1.3.3-1.1.jar`. Gradle 9 needs JDK 17 or newer (`JAVA_HOME`).
 
 Run in dev mode with `./gradlew runClient` (`-dev -mod build/jar/`); a plain Steam launch does not pass `-mod`, so the dev mod is not listed. The Workshop upload button only appears when the jar contains `resources/preview.png`; regenerate it with `python tools/make_workshop_images.py .` (needs Pillow and Windows fonts).

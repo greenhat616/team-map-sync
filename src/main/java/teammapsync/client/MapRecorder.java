@@ -61,6 +61,19 @@ public final class MapRecorder {
         buffer.add(tileX | tileY << 8, argb & 0xFFFFFF);
     }
 
+    interface PendingTile {
+        void accept(String level, int regionX, int regionY, int index);
+    }
+
+    /** Every tile recorded since the last {@link #drain}, without draining. */
+    static void forEachPending(PendingTile consumer) {
+        for (Buffer buffer : buffers.values()) {
+            for (int i = 0; i < buffer.size; i++) {
+                consumer.accept(buffer.level, buffer.regionX, buffer.regionY, (int) (buffer.entries[i] >>> 32));
+            }
+        }
+    }
+
     static void clear() {
         buffers.clear();
         lastRegion = null;

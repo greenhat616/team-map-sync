@@ -6,21 +6,23 @@ import necesse.engine.network.client.ClientLevelManager;
 import necesse.engine.window.WindowManager;
 import necesse.gfx.forms.Form;
 import necesse.gfx.forms.components.FormCheckBox;
+import necesse.gfx.forms.presets.EditMapMarkerForm;
 
-/** Adds the "share with team" checkbox to the vanilla marker edit form. */
+/** Adds the "share with team" checkbox to the vanilla marker edit form. Its choice applies when the form closes. */
 public final class TeamMarkerCheckbox {
 
     private TeamMarkerCheckbox() {
     }
 
-    public static void add(Form inputForm, Client client, ClientLevelManager.MapMarker marker, boolean isNewMarker) {
+    public static void add(EditMapMarkerForm form, Form inputForm, Client client, ClientLevelManager.MapMarker marker, boolean isNewMarker) {
         TeamMapClient session = TeamMapClient.active(client);
         if (session == null || inputForm == null || marker == null) {
             return;
         }
+        session.editing(marker, form);
         boolean checked = session.isShared(marker);
         if (isNewMarker && TeamMarkers.shareNewMarkers && !checked) {
-            session.setShared(marker, true);
+            session.setShared(marker, true, form);
             checked = true;
         }
         int y = inputForm.getHeight();
@@ -29,7 +31,7 @@ public final class TeamMarkerCheckbox {
         box.onClicked(e -> {
             TeamMapClient current = TeamMapClient.active(client);
             if (current != null) {
-                current.setShared(marker, e.from.checked);
+                current.setShared(marker, e.from.checked, form);
                 TeamMarkers.shareNewMarkers = e.from.checked;
             }
         });

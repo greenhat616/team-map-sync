@@ -13,8 +13,8 @@ import teammapsync.client.TeamMarkerCheckbox;
 public class EditMapMarkerFormPatch {
 
     @Advice.OnMethodExit
-    static void onExit(@Advice.FieldValue("inputForm") Form inputForm, @Advice.Argument(0) Client client,
+    static void onExit(@Advice.This EditMapMarkerForm form, @Advice.FieldValue("inputForm") Form inputForm, @Advice.Argument(0) Client client,
                        @Advice.Argument(2) ClientLevelManager.MapMarker marker, @Advice.Argument(3) boolean isNewMarker) {
-        TeamMarkerCheckbox.add(inputForm, client, marker, isNewMarker);
+        TeamMarkerCheckbox.add(form, inputForm, client, marker, isNewMarker);
     }
 }

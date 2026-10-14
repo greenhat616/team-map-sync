@@ -1,6 +1,8 @@
 package teammapsync.codec;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
 import java.util.zip.Inflater;
@@ -23,6 +25,7 @@ public final class TileCodec {
 
     public static final byte CODEC_GRID_DEFLATE = 1;
     public static final int MAX_TILES = 256 * 256;
+    public static final int BAND_ROWS = 16;
 
     private static final ThreadLocal<Deflater> DEFLATER = ThreadLocal.withInitial(() -> new Deflater(6, true));
     private static final ThreadLocal<Inflater> INFLATER = ThreadLocal.withInitial(() -> new Inflater(true));
@@ -81,6 +84,32 @@ public final class TileCodec {
             written += deflater.deflate(out, written, out.length - written);
         }
         return Arrays.copyOf(out, written);
+    }
+
+    /**
+     * Encodes tiles sorted by index as one payload per band of {@link #BAND_ROWS} rows. Vanilla drops a whole
+     * packet when one of its 1 KB network fragments is lost, so small packets lose (and resend) far less; a band of
+     * a fully explored region compresses to about one fragment.
+     */
+    public static List<byte[]> encodeBands(int[] indices, int[] rgb, int count) {
+        ArrayList<byte[]> out = new ArrayList<>();
+        int start = 0;
+        while (start < count) {
+            int band = (indices[start] >>> 8) / BAND_ROWS;
+            int end = start + 1;
+            while (end < count && (indices[end] >>> 8) / BAND_ROWS == band) {
+                end++;
+            }
+            boolean any = false;
+            for (int i = start; i < end && !any; i++) {
+                any = rgb[i] != 0;
+            }
+            if (any) {
+                out.add(encode(Arrays.copyOfRange(indices, start, end), Arrays.copyOfRange(rgb, start, end), end - start));
+            }
+            start = end;
+        }
+        return out;
     }
 
     /** Returns the included tiles, sorted by index. */

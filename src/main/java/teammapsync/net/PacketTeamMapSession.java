@@ -8,25 +8,35 @@ import necesse.engine.network.client.Client;
 import teammapsync.client.TeamMapClient;
 
 /**
- * Server to client: a sync session started for this team (-1 means none). Sent after the hello and whenever the
- * player's team changes; the client drops the previous team's markers and starts sharing with the new one.
+ * Server to client: a sync session started. {@code epoch} grows with every session and is carried by every other
+ * packet, so data from a previous team or connection is recognised and dropped. {@code teamKey} is the team's
+ * persistent id, or null when the player has no team. Repeated until the client's heartbeat names this epoch.
  */
 public class PacketTeamMapSession extends Packet {
 
-    public final int teamID;
+    public final int epoch;
+    public final String teamKey;
 
     public PacketTeamMapSession(byte[] data) {
         super(data);
-        this.teamID = new PacketReader(this).getNextInt();
+        PacketReader reader = new PacketReader(this);
+        this.epoch = reader.getNextInt();
+        this.teamKey = reader.getNextBoolean() ? reader.getNextString() : null;
     }
 
-    public PacketTeamMapSession(int teamID) {
-        this.teamID = teamID;
-        new PacketWriter(this).putNextInt(teamID);
+    public PacketTeamMapSession(int epoch, String teamKey) {
+        this.epoch = epoch;
+        this.teamKey = teamKey;
+        PacketWriter writer = new PacketWriter(this);
+        writer.putNextInt(epoch);
+        writer.putNextBoolean(teamKey != null);
+        if (teamKey != null) {
+            writer.putNextString(teamKey);
+        }
     }
 
     @Override
     public void processClient(NetworkPacket packet, Client client) {
-        TeamMapClient.onSession(client, this.teamID);
+        TeamMapClient.onSession(client, this.epoch, this.teamKey);
     }
 }

@@ -13,13 +13,19 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import necesse.engine.GameLog;
 import teammapsync.TeamMarker;
+import teammapsync.store.RegionStore;
 
 /**
  * Every team's shared markers. Lives on the server thread; a team's file is read once on first use (it holds a
- * few hundred small records at most) and writes are handed to the worker as snapshots.
+ * few hundred small records at most) and writes are handed to the worker as snapshots. A failed write puts the
+ * team back on the dirty list.
+ *
+ * <p>Every change gets the next revision number, which clients use to ignore stale or repeated updates. Revisions
+ * only need to grow within one server run: clients drop what they know at every new session.
  */
 final class TeamMarkerStore {
 
@@ -27,62 +33,77 @@ final class TeamMarkerStore {
     private static final int FILE_MAGIC = 0x544D534D; // "TMSM"
     private static final int FILE_VERSION = 1;
 
-    private final TeamRegionStore regions;
-    private final HashMap<Integer, LinkedHashMap<UUID, TeamMarker>> teams = new HashMap<>();
-    private final HashSet<Integer> dirtyTeams = new HashSet<>();
+    private final RegionStore regions;
+    private final HashMap<String, LinkedHashMap<UUID, Stored>> teams = new HashMap<>();
+    private final HashSet<String> dirtyTeams = new HashSet<>();
+    private final ConcurrentLinkedQueue<String> failedTeams = new ConcurrentLinkedQueue<>();
+    private long revision;
 
-    TeamMarkerStore(TeamRegionStore regions) {
+    TeamMarkerStore(RegionStore regions) {
         this.regions = regions;
     }
 
-    Collection<TeamMarker> markers(int team) {
+    Collection<Stored> markers(String team) {
         return team(team).values();
     }
 
     /** @return the stored marker, or null if it was rejected */
-    TeamMarker set(int team, TeamMarker marker) {
-        LinkedHashMap<UUID, TeamMarker> markers = team(team);
-        TeamMarker existing = markers.get(marker.id);
-        TeamMarker stored;
+    Stored set(String team, TeamMarker marker) {
+        LinkedHashMap<UUID, Stored> markers = team(team);
+        Stored existing = markers.get(marker.id);
+        TeamMarker value;
         if (existing != null) {
-            stored = existing.withLook(marker.icon, marker.name);
+            value = existing.marker.withLook(marker.icon, marker.name);
         } else if (markers.size() < MAX_MARKERS_PER_TEAM) {
-            stored = marker;
+            value = marker;
         } else {
             return null;
         }
-        markers.put(stored.id, stored);
+        Stored stored = new Stored(value, ++revision);
+        markers.put(value.id, stored);
         dirtyTeams.add(team);
         return stored;
     }
 
-    boolean remove(int team, UUID id) {
-        if (team(team).remove(id) != null) {
-            dirtyTeams.add(team);
-            return true;
+    /** @return the removal's revision, or -1 if there was no such marker */
+    long remove(String team, UUID id) {
+        if (team(team).remove(id) == null) {
+            return -1;
         }
-        return false;
+        dirtyTeams.add(team);
+        return ++revision;
     }
 
     void saveDirty(Executor worker) {
-        for (Integer team : dirtyTeams) {
+        String failed;
+        while ((failed = failedTeams.poll()) != null) {
+            dirtyTeams.add(failed);
+        }
+        for (String team : dirtyTeams) {
             File file = file(team);
-            ArrayList<TeamMarker> snapshot = new ArrayList<>(team(team).values());
-            worker.execute(() -> write(file, snapshot));
+            ArrayList<TeamMarker> snapshot = new ArrayList<>();
+            for (Stored stored : team(team).values()) {
+                snapshot.add(stored.marker);
+            }
+            worker.execute(() -> {
+                if (!write(file, snapshot)) {
+                    failedTeams.add(team);
+                }
+            });
         }
         dirtyTeams.clear();
     }
 
-    private LinkedHashMap<UUID, TeamMarker> team(int team) {
+    private LinkedHashMap<UUID, Stored> team(String team) {
         return teams.computeIfAbsent(team, this::read);
     }
 
-    private File file(int team) {
-        return new File(regions.teamFolder(team), "markers.dat");
+    private File file(String team) {
+        return new File(regions.bucketFolder(team), "markers.dat");
     }
 
-    private LinkedHashMap<UUID, TeamMarker> read(int team) {
-        LinkedHashMap<UUID, TeamMarker> markers = new LinkedHashMap<>();
+    private LinkedHashMap<UUID, Stored> read(String team) {
+        LinkedHashMap<UUID, Stored> markers = new LinkedHashMap<>();
         File file = file(team);
         if (!file.isFile()) {
             return markers;
@@ -96,7 +117,7 @@ final class TeamMarkerStore {
                 TeamMarker marker = new TeamMarker(new UUID(in.readLong(), in.readLong()), in.readUTF(), in.readUTF(), in.readUTF(),
                         in.readInt(), in.readInt());
                 if (marker.isValid()) {
-                    markers.put(marker.id, marker);
+                    markers.put(marker.id, new Stored(marker, ++revision));
                 }
             }
         } catch (IOException e) {
@@ -105,7 +126,7 @@ final class TeamMarkerStore {
         return markers;
     }
 
-    private static void write(File file, ArrayList<TeamMarker> markers) {
+    private static boolean write(File file, ArrayList<TeamMarker> markers) {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
@@ -122,9 +143,21 @@ final class TeamMarkerStore {
                 out.writeInt(marker.tileY);
             }
             out.flush();
-            TeamRegionStore.writeAtomically(file, bytes.toByteArray());
+            RegionStore.writeAtomically(file, bytes.toByteArray());
+            return true;
         } catch (IOException e) {
-            GameLog.warn.println("TeamMapSync: could not save " + file + ": " + e.getMessage());
+            GameLog.warn.println("TeamMapSync: could not save " + file + ", will retry: " + e.getMessage());
+            return false;
+        }
+    }
+
+    static final class Stored {
+        final TeamMarker marker;
+        final long revision;
+
+        Stored(TeamMarker marker, long revision) {
+            this.marker = marker;
+            this.revision = revision;
         }
     }
 }
