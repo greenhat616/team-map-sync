@@ -34,11 +34,46 @@ Vanilla's transport is unreliable (Steam "unreliable" messages or plain UDP). Pa
 - **Congestion**: bytes in flight are capped, so a slow or lossy link slows this traffic through late acknowledgements. Bulk data backs off further while the client's vanilla region loading has requests outstanding, leaving room for terrain.
 - A local map file only counts as uploaded once every packet of it was acknowledged; the server stops acknowledging when a player exceeds its receive allowance, so excess uploads are delayed, not lost.
 
+## Low traffic mode
+
+Off by default. The server owner (or the host of a hosted game) turns it on in `cfg/mods/a632079.teammapsync.cfg` of the game's data folder (for a dedicated server, the folder given with `-datadir`). A hosting client creates the file with defaults; a dedicated server does not, so create it there:
+
+```
+{
+	SETTINGS = {
+		lowTraffic = true
+	}
+}
+```
+
+The setting is read when the server starts. With it on, players upload only *which* tiles their discovery changed (a bitmask), and the server colours them from its own level with vanilla's map colour rules minus lighting. It then merges them into the team's map and relays only the tiles whose colour changed. Exploration made before joining the team (the local map files) is still uploaded as colours.
+
+Measured on a real world (443k surface tiles, 72k cave and dungeon tiles, same compression as normal mode):
+
+| Data | Surface | Caves and dungeons |
+|---|---|---|
+| Colours as seen by the player (normal mode) | 173 KB | 74 KB |
+| Discovery mask (low traffic upload) | 7 KB | 8 KB |
+| Colours without lighting (low traffic download) | 165 KB | 29 KB |
+
+Uploads shrink by 90-95%. Downloads shrink by about 60% in caves, where vanilla's lighting makes every tile's colour different, and barely change on the surface. Map colours there are already mostly a function of tile and object.
+
+Trade-offs:
+
+- Teammates see caves and indoor areas evenly lit, as if fully lit. Your own map keeps vanilla's look.
+- On a dedicated server, trees and some liquids use their plain map colour (the exact ones need client textures).
+- Only these tiles are coloured: within 96 tiles of where the player stood when the server accepted the mask, on the level the player was on, and in terrain the server still has loaded. Vanilla already sends a client the terrain 80 tiles around it, so a modified client learns nothing new this way. Tiles discovered just before changing level, or before a long delay on a very lossy link, can be lost.
+- Only tiles whose colour differs from the team's stored map are relayed, so lit and unlit views of the same tile do not bounce between players. A player who comes back online still holding terrain that changed while they were away keeps the old look until they see that spot again. Stored data reaches a joining player as fill only.
+- The server colours at most 64k tiles per player per second, and at most 16k per tick for all players together (about 1.5 ms). Masks are queued and coloured in slices across ticks. Pending work per player is capped, and over the cap new masks are not acknowledged, so the client sends them later. Masks that were already acknowledged are still coloured after their player leaves and before the server stops.
+- Colour uploads from an outdated client only fill undiscovered tiles while the mode is on.
+
+All players need the same mod version; the mode itself needs no client setting.
+
 ## Performance design
 
 The guiding constraint is no effect on server TPS.
 
-- **Server thread** only forwards already-compressed bytes, updates counters and drains send queues. Decoding, merging, encoding and all file IO run on one low-priority worker thread.
+- **Server thread** only forwards already-compressed bytes, updates counters and drains send queues. Decoding, merging, encoding and all file IO run on one low-priority worker thread. In low traffic mode the server thread also reads tile colours from the level, which only it may touch, within the per-player tile cap above.
 - **Bandwidth caps**: client upload about 40 KB/s; server send about 50 KB/s per player and 320 KB/s for the whole server, players served round robin; server accepts at most 96 KB/s per player (burst 192 KB). Overdrafts carry over to later ticks, so large packets cannot exceed the average.
 - **Client game thread** writes received tiles into the open map at most 4096 tiles per tick; compression and file access run on a worker thread.
 - **Memory**: stored maps are streamed to joining players and replayed from the inbox a few regions at a time, never loaded as a whole.

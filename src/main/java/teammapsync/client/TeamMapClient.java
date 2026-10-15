@@ -80,6 +80,8 @@ public final class TeamMapClient {
     /** 0 until the server announced a session; read by worker tasks to abandon stale work. */
     private volatile int epoch;
     private String teamKey;
+    /** The server colours tiles itself: own discoveries are uploaded as masks. */
+    private volatile boolean lowTraffic;
     private SeqWindow received = new SeqWindow();
     private final SeqList acks = new SeqList();
     private OrderedBuffer<Runnable> orderedIn = new OrderedBuffer<>();
@@ -138,12 +140,13 @@ public final class TeamMapClient {
         return self != null && self.client == client && self.teamKey != null ? self : null;
     }
 
-    public static void onSession(Client client, int epoch, String teamKey) {
+    public static void onSession(Client client, int epoch, String teamKey, boolean lowTraffic) {
         TeamMapClient self = get(client);
         if (self == null) {
             return;
         }
         if (epoch > self.epoch) {
+            self.lowTraffic = lowTraffic;
             self.startSession(epoch, teamKey);
         }
         self.lastStatusTick = -STATUS_TICKS; // confirm it right away, also when this was a repeat
@@ -429,8 +432,15 @@ public final class TeamMapClient {
             }
         }
         int sessionEpoch = epoch;
+        boolean masks = lowTraffic;
         worker.execute(() -> {
             for (MapRecorder.Delta delta : deltas) {
+                if (masks) {
+                    byte[] mask = TileCodec.encodeMask(delta.indices, delta.indices.length);
+                    channel.enqueue(sessionEpoch, true, (seq, ordinal) -> new PacketTeamMapTiles(sessionEpoch, seq, ordinal,
+                            PacketTeamMapTiles.MODE_MASK, delta.level, delta.regionX, delta.regionY, mask), mask.length, null);
+                    continue;
+                }
                 for (byte[] band : TileCodec.encodeBands(delta.indices, delta.rgb, delta.indices.length)) {
                     channel.enqueue(sessionEpoch, true, (seq, ordinal) -> new PacketTeamMapTiles(sessionEpoch, seq, ordinal,
                             PacketTeamMapTiles.MODE_LIVE, delta.level, delta.regionX, delta.regionY, band), band.length, null);

@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -79,6 +80,26 @@ public final class RegionStore {
                 region.dirty = true;
             }
         }
+    }
+
+    /** Overwrites with {@code tiles} like live data and returns the tiles whose colour changed, sorted by index. */
+    public TileCodec.Tiles mergeChanged(String bucket, String level, int regionX, int regionY, TileCodec.Tiles tiles) {
+        Region region = region(bucket, level, regionX, regionY);
+        int[] colors = region.colors;
+        int[] indices = new int[tiles.size()];
+        int[] rgb = new int[tiles.size()];
+        int n = 0;
+        for (int i = 0; i < tiles.size(); i++) {
+            int index = tiles.indices[i];
+            int value = tiles.rgb[i] | PRESENT;
+            if (colors[index] == 0 || (colors[index] & 0xFFFFFF) != tiles.rgb[i]) {
+                colors[index] = value;
+                region.dirty = true;
+                indices[n] = index;
+                rgb[n++] = tiles.rgb[i];
+            }
+        }
+        return new TileCodec.Tiles(Arrays.copyOf(indices, n), Arrays.copyOf(rgb, n));
     }
 
     /** The region's tiles ({@link #PRESENT} and {@link #LIVE} flags included), or null if nothing is stored. */

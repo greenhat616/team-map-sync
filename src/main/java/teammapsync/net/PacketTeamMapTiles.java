@@ -21,6 +21,11 @@ public class PacketTeamMapTiles extends Packet {
     public static final int MODE_LIVE = 0;
     /** Older or stored data: only fills tiles the receiver has not discovered. */
     public static final int MODE_FILL = 1;
+    /**
+     * Low traffic mode, client to server only: the payload is a {@link teammapsync.codec.TileCodec#encodeMask mask}
+     * of tiles the player's discovery changed; the server colours them from its own level and relays the result.
+     */
+    public static final int MODE_MASK = 2;
 
     /** A band of 16 full rows is about 12 KB before compression; this only rejects garbage. */
     public static final int MAX_PAYLOAD = 32 * 1024;

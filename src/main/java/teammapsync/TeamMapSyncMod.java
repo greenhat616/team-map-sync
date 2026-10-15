@@ -5,6 +5,7 @@ import necesse.engine.GameEvents;
 import necesse.engine.events.ServerClientDisconnectEvent;
 import necesse.engine.events.ServerStartEvent;
 import necesse.engine.events.ServerStopEvent;
+import necesse.engine.modLoader.ModSettings;
 import necesse.engine.modLoader.annotations.ModEntry;
 import necesse.engine.registries.PacketRegistry;
 import teammapsync.net.PacketTeamMapAck;
@@ -22,6 +23,10 @@ import teammapsync.server.TeamMapServer;
  */
 @ModEntry
 public class TeamMapSyncMod {
+
+    public ModSettings initSettings() {
+        return new TeamMapSettings();
+    }
 
     public void init() {
         PacketRegistry.registerPacket(PacketTeamMapAck.class);

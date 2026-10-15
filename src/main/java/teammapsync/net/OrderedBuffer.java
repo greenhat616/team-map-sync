@@ -21,21 +21,27 @@ public final class OrderedBuffer<T> {
         return ordinal > 0 && (long) ordinal - next < MAX_AHEAD;
     }
 
+    /** True for the missing packet that packets already waiting depend on. */
+    public boolean unblocks(int ordinal) {
+        return ordinal == next && !waiting.isEmpty();
+    }
+
     /** Hands on everything still waiting, in order, skipping the gaps; used when the connection ends. */
     public void flushWaiting(Consumer<T> deliver) {
         waiting.keySet().stream().sorted().forEach(ordinal -> deliver.accept(waiting.get(ordinal)));
         waiting.clear();
     }
 
-    public void receive(int ordinal, T item, Consumer<T> deliver) {
-        if (ordinal < next || !isAcceptable(ordinal)) {
-            return;
+    /** @return false if the item was dropped: its ordinal was delivered already or is taken by a waiting item */
+    public boolean receive(int ordinal, T item, Consumer<T> deliver) {
+        if (ordinal < next || !isAcceptable(ordinal) || waiting.putIfAbsent(ordinal, item) != null) {
+            return false;
         }
-        waiting.put(ordinal, item);
         T ready;
         while ((ready = waiting.remove(next)) != null) {
             next++;
             deliver.accept(ready);
         }
+        return true;
     }
 }

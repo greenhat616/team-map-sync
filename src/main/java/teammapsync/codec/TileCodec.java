@@ -24,6 +24,7 @@ import java.util.zip.Inflater;
 public final class TileCodec {
 
     public static final byte CODEC_GRID_DEFLATE = 1;
+    public static final byte CODEC_MASK_DEFLATE = 2;
     public static final int MAX_TILES = 256 * 256;
     public static final int BAND_ROWS = 16;
 
@@ -70,13 +71,83 @@ public final class TileCodec {
             raw[pos + 2] = (byte) rgb[i];
         }
 
+        return deflate(new byte[]{CODEC_GRID_DEFLATE}, raw);
+    }
+
+    /**
+     * Low traffic mode: which tiles changed, without colours; the server reads them from its own level. The
+     * bounding box comes before the compressed bits, so the receiver knows the decoding work up front.
+     *
+     * @param indices tile indices ({@code x | y << 8}), each below {@link #MAX_TILES}, in any order
+     */
+    public static byte[] encodeMask(int[] indices, int count) {
+        int minX = 255, minY = 255, maxX = 0, maxY = 0;
+        for (int i = 0; i < count; i++) {
+            minX = Math.min(minX, indices[i] & 0xFF);
+            minY = Math.min(minY, indices[i] >>> 8);
+            maxX = Math.max(maxX, indices[i] & 0xFF);
+            maxY = Math.max(maxY, indices[i] >>> 8);
+        }
+        if (count == 0) {
+            minX = minY = 0;
+        }
+        int width = maxX - minX + 1;
+        byte[] bits = new byte[(width * (maxY - minY + 1) + 7) / 8];
+        for (int i = 0; i < count; i++) {
+            int bit = (indices[i] & 0xFF) - minX + ((indices[i] >>> 8) - minY) * width;
+            bits[bit >> 3] |= (byte) (1 << (bit & 7));
+        }
+        return deflate(new byte[]{CODEC_MASK_DEFLATE, (byte) minX, (byte) minY, (byte) (width - 1), (byte) (maxY - minY)}, bits);
+    }
+
+    /** Tiles in a mask's bounding box (the most it can hold), or -1 if it is no mask. */
+    public static int maskArea(byte[] payload) {
+        if (payload.length < 6 || payload[0] != CODEC_MASK_DEFLATE) {
+            return -1;
+        }
+        return ((payload[3] & 0xFF) + 1) * ((payload[4] & 0xFF) + 1);
+    }
+
+    /** Returns the tile indices of a mask, sorted. */
+    public static int[] decodeMask(byte[] payload) throws DataFormatException {
+        int area = maskArea(payload);
+        if (area < 0) {
+            throw new DataFormatException("Unknown mask codec");
+        }
+        int minX = payload[1] & 0xFF;
+        int minY = payload[2] & 0xFF;
+        int width = (payload[3] & 0xFF) + 1;
+        if (minX + width > 256 || minY + area / width > 256) {
+            throw new DataFormatException("Mask outside the region");
+        }
+        Inflater inflater = INFLATER.get();
+        inflater.reset();
+        inflater.setInput(payload, 5, payload.length - 5);
+        byte[] bits = new byte[(area + 7) / 8];
+        inflateFully(inflater, bits);
+        int count = 0;
+        for (int bit = 0; bit < area; bit++) {
+            if ((bits[bit >> 3] & 1 << (bit & 7)) != 0) {
+                count++;
+            }
+        }
+        int[] indices = new int[count];
+        int n = 0;
+        for (int bit = 0; bit < area; bit++) {
+            if ((bits[bit >> 3] & 1 << (bit & 7)) != 0) {
+                indices[n++] = (minX + bit % width) | (minY + bit / width) << 8;
+            }
+        }
+        return indices;
+    }
+
+    private static byte[] deflate(byte[] header, byte[] raw) {
         Deflater deflater = DEFLATER.get();
         deflater.reset();
         deflater.setInput(raw);
         deflater.finish();
-        byte[] out = new byte[Math.max(256, raw.length / 4)];
-        out[0] = CODEC_GRID_DEFLATE;
-        int written = 1;
+        byte[] out = Arrays.copyOf(header, Math.max(256, header.length + raw.length / 4));
+        int written = header.length;
         while (!deflater.finished()) {
             if (written == out.length) {
                 out = Arrays.copyOf(out, out.length * 2);
